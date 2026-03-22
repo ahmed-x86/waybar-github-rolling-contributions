@@ -27,11 +27,11 @@ Designed for seamless integration with status bars like **Waybar**, **Polybar**,
 
 | Contributions | Color Hex  | Meaning            |
 |---------------|------------|--------------------|
-| 0             | `#161b22`  | No contributions   |
-| 1–3           | `#3d2258`  | Low activity       |
-| 4–6           | `#6a3896`  | Moderate activity  |
-| 7–9           | `#974ddb`  | High activity      |
-| 10+           | `#c463ff`  | Very high activity |
+| 0             | ![#161b22](https://placehold.co/15x15/161b22/161b22.png) `#161b22`  | No contributions   |
+| 1–3           | ![#3d2258](https://placehold.co/15x15/3d2258/3d2258.png) `#3d2258`  | Low activity       |
+| 4–6           | ![#6a3896](https://placehold.co/15x15/6a3896/6a3896.png) `#6a3896`  | Moderate activity  |
+| 7–9           | ![#974ddb](https://placehold.co/15x15/974ddb/974ddb.png) `#974ddb`  | High activity      |
+| 10+           | ![#c463ff](https://placehold.co/15x15/c463ff/c463ff.png) `#c463ff`  | Very high activity |
 
 -----
 
