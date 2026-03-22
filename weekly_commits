@@ -11,14 +11,11 @@ import time
 
 load_dotenv()
 
-RETRY_DELAY = 2
-
 MAX_RETRIES = 5
 RETRY_DELAY = 3  # seconds
 
 output = {}
 success = False
-
 
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
@@ -26,10 +23,10 @@ GITHUB_PAT = os.getenv("GITHUB_PAT")
 if not GITHUB_USERNAME or not GITHUB_PAT:
     raise ValueError("GITHUB_USERNAME or GITHUB_PAT not set in .env")
 
-
+# --- Date Logic: Last 7 rolling days ---
 today = datetime.date.today()
-start_of_week = today - datetime.timedelta(days=(today.weekday() + 1) % 7)
-from_date = start_of_week.isoformat() + "T00:00:00Z"
+start_date = today - datetime.timedelta(days=6)
+from_date = start_date.isoformat() + "T00:00:00Z"
 to_date = today.isoformat() + "T23:59:59Z"
 
 query = """
@@ -61,31 +58,18 @@ headers = {
     "Accept": "application/vnd.github.v4.idl"
 }
 
-COLOR_SCHEME_DARK = {
-    0: "#202329",   # No contributions
-    1: "#0e4429",   # 1-3 commits
-    2: "#006d32",   # 4-6 commits
-    3: "#26a641",   # 7-9 commits
-    4: "#39d353"    # 10+ commits
+# --- Color Scheme: GitHub Purple Gradient ---
+COLOR_SCHEME_PURPLE = {
+    0: "#161b22",   # No contributions (Original GitHub color for empty squares)
+    1: "#3d2258",   # 1-3 (Low activity) - Very dark purple
+    2: "#6a3896",   # 4-6 (Moderate activity) - Medium purple
+    3: "#974ddb",   # 7-9 (High activity) - Bright purple
+    4: "#c463ff"    # 10+ (Very high activity) - Very bright purple
 }
 
-COLOR_SCHEME_LIGHT = {
-    0: "#ebedf0",   # No contributions
-    1: "#9be9a8",   # 1-3 commits
-    2: "#40c463",   # 4-6 commits
-    3: "#30a14e",   # 7-9 commits
-    4: "#216e39"    # 10+ commits
-}
-
-
-theme = sys.argv[1].upper() if len(sys.argv) > 1 else "DARK"
-if theme not in ["DARK", "LIGHT"]:
-    print(f"Unknown theme '{theme}', defaulting to DARK.")
-    theme = "DARK"
-
-def get_color(count, theme):
-    """Return heatmap color based on commit count and theme."""
-    scheme = COLOR_SCHEME_DARK if theme == "DARK" else COLOR_SCHEME_LIGHT
+def get_color(count):
+    """Return the appropriate purple color based on contribution count (GitHub logic)"""
+    scheme = COLOR_SCHEME_PURPLE
 
     if count == 0:
         return scheme[0]
@@ -100,7 +84,6 @@ def get_color(count, theme):
 
 def get_weekday_name(weekday):
     return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(weekday + 1) % 7]
-
 
 for attempt in range(MAX_RETRIES):
     try:
@@ -120,13 +103,13 @@ for attempt in range(MAX_RETRIES):
 
         contributions = OrderedDict()
         for i in range(7):
-            day = start_of_week + datetime.timedelta(days=i)
+            day = start_date + datetime.timedelta(days=i)
             contributions[day] = 0
 
         for week in weeks:
             for day in week["contributionDays"]:
                 date = datetime.date.fromisoformat(day["date"])
-                if start_of_week <= date <= today:
+                if start_date <= date <= today:
                     contributions[date] = day["contributionCount"]
 
         dots = []
@@ -134,7 +117,7 @@ for attempt in range(MAX_RETRIES):
         total_contributions = 0
 
         for date, count in contributions.items():
-            color = get_color(count, theme)
+            color = get_color(count)
             dots.append(f'<span foreground="{color}">■</span>')
             weekday = get_weekday_name(date.weekday())
             tooltip_lines.append(f"{weekday} ({date.day}/{date.month}): {count} contribution{'s' if count != 1 else ''}")
@@ -143,7 +126,7 @@ for attempt in range(MAX_RETRIES):
         output = {
             "text": " ".join(dots),
             "tooltip": "\n".join([
-                f"GitHub Contributions ({start_of_week.strftime('%d/%m')} to {today.strftime('%d/%m')})",
+                f"GitHub Contributions ({start_date.strftime('%d/%m')} to {today.strftime('%d/%m')})",
                 f"Total: {total_contributions}"
             ] + tooltip_lines),
             "class": "github-contributions",
@@ -151,7 +134,7 @@ for attempt in range(MAX_RETRIES):
         }
 
         success = True
-        break  # exit retry loop on success
+        break  # Exit the retry loop on success
 
     except requests.exceptions.RequestException as e:
         if attempt == MAX_RETRIES - 1:
@@ -169,7 +152,6 @@ for attempt in range(MAX_RETRIES):
             "class": "error",
             "alt": "Error"
         }
-        break  # break if it's not a retryable error
-
+        break
 
 print(json.dumps(output))
