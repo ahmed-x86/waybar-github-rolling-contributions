@@ -8,6 +8,8 @@ import os
 from dotenv import load_dotenv
 import sys
 import time
+import argparse
+import colorsys
 
 load_dotenv()
 
@@ -22,6 +24,73 @@ GITHUB_PAT = os.getenv("GITHUB_PAT")
 
 if not GITHUB_USERNAME or not GITHUB_PAT:
     raise ValueError("GITHUB_USERNAME or GITHUB_PAT not set in .env")
+
+# --- Argument Parsing for Dynamic Colors ---
+parser = argparse.ArgumentParser(description="GitHub Rolling Contributions Widget")
+parser.add_argument('-c', '--color', type=str, default='#c463ff', 
+                    help='Base color in HEX (e.g., #c463ff) or RGB (e.g., 196,99,255)')
+args = parser.parse_args()
+
+def parse_input_color(color_str):
+    """Converts RGB input to HEX or validates HEX input."""
+    color_str = color_str.strip().replace(' ', '')
+    
+    # If it's already a HEX code
+    if color_str.startswith('#'):
+        return color_str
+    
+    # If it's an RGB string (with or without brackets like (255,255,255) or 255,255,255)
+    elif ',' in color_str:
+        try:
+            r, g, b = map(int, color_str.strip('()').split(','))
+            return '#{:02x}{:02x}{:02x}'.format(r, g, b)
+        except ValueError:
+            pass
+            
+    return '#c463ff'  # Default fallback if parsing fails
+
+def generate_palette(base_hex):
+    """Generates a 5-level color palette by reducing lightness of the base color."""
+    base_hex = base_hex.lstrip('#')
+    # Convert HEX to RGB (0-255)
+    r, g, b = tuple(int(base_hex[i:i+2], 16) for i in (0, 2, 4))
+    
+    # Convert RGB to HLS (0.0 - 1.0)
+    h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+
+    palette = {0: "#161b22"}  # Empty state (Original GitHub dark color)
+    
+    # Generate levels 1 to 4 by scaling the lightness (L)
+    for i in range(1, 5):
+        factor = i / 4.0  # Level 1: 25%, Level 2: 50%, Level 3: 75%, Level 4: 100%
+        new_l = l * factor
+        
+        # Convert back to RGB then to HEX
+        nr, ng, nb = colorsys.hls_to_rgb(h, new_l, s)
+        nr, ng, nb = [int(max(0, min(255, c * 255))) for c in (nr, ng, nb)]
+        palette[i] = '#{:02x}{:02x}{:02x}'.format(nr, ng, nb)
+        
+    return palette
+
+# Generate the color scheme based on user input
+base_color_hex = parse_input_color(args.color)
+COLOR_SCHEME = generate_palette(base_color_hex)
+
+def get_color(count):
+    """Return the appropriate dynamically generated color based on contribution count."""
+    if count == 0:
+        return COLOR_SCHEME[0]
+    elif 1 <= count <= 3:
+        return COLOR_SCHEME[1]
+    elif 4 <= count <= 6:
+        return COLOR_SCHEME[2]
+    elif 7 <= count <= 9:
+        return COLOR_SCHEME[3]
+    else:
+        return COLOR_SCHEME[4]
+
+def get_weekday_name(weekday):
+    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(weekday + 1) % 7]
 
 # --- Date Logic: Last 7 rolling days ---
 today = datetime.date.today()
@@ -57,33 +126,6 @@ headers = {
     "Authorization": f"Bearer {GITHUB_PAT}",
     "Accept": "application/vnd.github.v4.idl"
 }
-
-# --- Color Scheme: GitHub Purple Gradient ---
-COLOR_SCHEME_PURPLE = {
-    0: "#161b22",   # No contributions (Original GitHub color for empty squares)
-    1: "#3d2258",   # 1-3 (Low activity) - Very dark purple
-    2: "#6a3896",   # 4-6 (Moderate activity) - Medium purple
-    3: "#974ddb",   # 7-9 (High activity) - Bright purple
-    4: "#c463ff"    # 10+ (Very high activity) - Very bright purple
-}
-
-def get_color(count):
-    """Return the appropriate purple color based on contribution count (GitHub logic)"""
-    scheme = COLOR_SCHEME_PURPLE
-
-    if count == 0:
-        return scheme[0]
-    elif 1 <= count <= 3:
-        return scheme[1]
-    elif 4 <= count <= 6:
-        return scheme[2]
-    elif 7 <= count <= 9:
-        return scheme[3]
-    else:
-        return scheme[4]
-
-def get_weekday_name(weekday):
-    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(weekday + 1) % 7]
 
 for attempt in range(MAX_RETRIES):
     try:
@@ -127,6 +169,7 @@ for attempt in range(MAX_RETRIES):
             "text": " ".join(dots),
             "tooltip": "\n".join([
                 f"GitHub Contributions ({start_date.strftime('%d/%m')} to {today.strftime('%d/%m')})",
+                f"Base Color: {base_color_hex}",
                 f"Total: {total_contributions}"
             ] + tooltip_lines),
             "class": "github-contributions",
@@ -134,7 +177,7 @@ for attempt in range(MAX_RETRIES):
         }
 
         success = True
-        break  # Exit the retry loop on success
+        break
 
     except requests.exceptions.RequestException as e:
         if attempt == MAX_RETRIES - 1:
