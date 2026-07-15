@@ -8,13 +8,40 @@ import os
 from dotenv import load_dotenv
 import sys
 import time
-import argparse
-import colorsys
 
 load_dotenv()
 
 MAX_RETRIES = 5
 RETRY_DELAY = 3  # seconds
+
+OFFSET_FILE = "/tmp/waybar_github_offset.txt"
+
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else None
+
+try:
+    with open(OFFSET_FILE, 'r') as f:
+        offset_weeks = int(f.read().strip())
+except Exception:
+    offset_weeks = 0
+
+if cmd in ["up", "down", "reset"]:
+    if cmd == "up":
+        offset_weeks += 1
+    elif cmd == "down":
+        offset_weeks -= 1
+    elif cmd == "reset":
+        offset_weeks = 0
+
+    if offset_weeks > 0:
+        offset_weeks = 0
+
+    with open(OFFSET_FILE, 'w') as f:
+        f.write(str(offset_weeks))
+    os.system("pkill -SIGRTMIN+11 waybar")
+    sys.exit(0)
+
+# ------------------------------------
 
 output = {}
 success = False
@@ -23,80 +50,18 @@ GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
 
 if not GITHUB_USERNAME or not GITHUB_PAT:
-    raise ValueError("GITHUB_USERNAME or GITHUB_PAT not set in .env")
+    print(json.dumps({"text": "⚠", "tooltip": "Missing Credentials"}))
+    sys.exit(1)
 
-# --- Argument Parsing for Dynamic Colors ---
-parser = argparse.ArgumentParser(description="GitHub Rolling Contributions Widget")
-parser.add_argument('-c', '--color', type=str, default='#c463ff', 
-                    help='Base color in HEX (e.g., #c463ff) or RGB (e.g., 196,99,255)')
-args = parser.parse_args()
 
-def parse_input_color(color_str):
-    """Converts RGB input to HEX or validates HEX input."""
-    color_str = color_str.strip().replace(' ', '')
-    
-    # If it's already a HEX code
-    if color_str.startswith('#'):
-        return color_str
-    
-    # If it's an RGB string (with or without brackets like (255,255,255) or 255,255,255)
-    elif ',' in color_str:
-        try:
-            r, g, b = map(int, color_str.strip('()').split(','))
-            return '#{:02x}{:02x}{:02x}'.format(r, g, b)
-        except ValueError:
-            pass
-            
-    return '#c463ff'  # Default fallback if parsing fails
+actual_today = datetime.date.today()
 
-def generate_palette(base_hex):
-    """Generates a 5-level color palette by reducing lightness of the base color."""
-    base_hex = base_hex.lstrip('#')
-    # Convert HEX to RGB (0-255)
-    r, g, b = tuple(int(base_hex[i:i+2], 16) for i in (0, 2, 4))
-    
-    # Convert RGB to HLS (0.0 - 1.0)
-    h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+target_end_date = actual_today + datetime.timedelta(days=offset_weeks * 7)
 
-    palette = {0: "#161b22"}  # Empty state (Original GitHub dark color)
-    
-    # Generate levels 1 to 4 by scaling the lightness (L)
-    for i in range(1, 5):
-        factor = i / 4.0  # Level 1: 25%, Level 2: 50%, Level 3: 75%, Level 4: 100%
-        new_l = l * factor
-        
-        # Convert back to RGB then to HEX
-        nr, ng, nb = colorsys.hls_to_rgb(h, new_l, s)
-        nr, ng, nb = [int(max(0, min(255, c * 255))) for c in (nr, ng, nb)]
-        palette[i] = '#{:02x}{:02x}{:02x}'.format(nr, ng, nb)
-        
-    return palette
+start_date = target_end_date - datetime.timedelta(days=6)
 
-# Generate the color scheme based on user input
-base_color_hex = parse_input_color(args.color)
-COLOR_SCHEME = generate_palette(base_color_hex)
-
-def get_color(count):
-    """Return the appropriate dynamically generated color based on contribution count."""
-    if count == 0:
-        return COLOR_SCHEME[0]
-    elif 1 <= count <= 3:
-        return COLOR_SCHEME[1]
-    elif 4 <= count <= 6:
-        return COLOR_SCHEME[2]
-    elif 7 <= count <= 9:
-        return COLOR_SCHEME[3]
-    else:
-        return COLOR_SCHEME[4]
-
-def get_weekday_name(weekday):
-    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(weekday + 1) % 7]
-
-# --- Date Logic: Last 7 rolling days ---
-today = datetime.date.today()
-start_date = today - datetime.timedelta(days=6)
 from_date = start_date.isoformat() + "T00:00:00Z"
-to_date = today.isoformat() + "T23:59:59Z"
+to_date = target_end_date.isoformat() + "T23:59:59Z"
 
 query = """
 query($user: String!, $from: DateTime!, $to: DateTime!) {
@@ -127,6 +92,24 @@ headers = {
     "Accept": "application/vnd.github.v4.idl"
 }
 
+COLOR_SCHEME_PURPLE = {
+    0: "#161b22",   # No contributions
+    1: "#3d2258",   # 1-3
+    2: "#6a3896",   # 4-6
+    3: "#974ddb",   # 7-9
+    4: "#c463ff"    # 10+
+}
+
+def get_color(count):
+    if count == 0: return COLOR_SCHEME_PURPLE[0]
+    elif 1 <= count <= 3: return COLOR_SCHEME_PURPLE[1]
+    elif 4 <= count <= 6: return COLOR_SCHEME_PURPLE[2]
+    elif 7 <= count <= 9: return COLOR_SCHEME_PURPLE[3]
+    else: return COLOR_SCHEME_PURPLE[4]
+
+def get_weekday_name(weekday):
+    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(weekday + 1) % 7]
+
 for attempt in range(MAX_RETRIES):
     try:
         if attempt > 0:
@@ -151,7 +134,7 @@ for attempt in range(MAX_RETRIES):
         for week in weeks:
             for day in week["contributionDays"]:
                 date = datetime.date.fromisoformat(day["date"])
-                if start_date <= date <= today:
+                if start_date <= date <= target_end_date:
                     contributions[date] = day["contributionCount"]
 
         dots = []
@@ -160,18 +143,29 @@ for attempt in range(MAX_RETRIES):
 
         for date, count in contributions.items():
             color = get_color(count)
-            dots.append(f'<span foreground="{color}">■</span>')
+            if date == actual_today:
+                dots.append(f'<span foreground="{color}" underline="single">■</span>')
+            else:
+                dots.append(f'<span foreground="{color}">■</span>')
+                
             weekday = get_weekday_name(date.weekday())
             tooltip_lines.append(f"{weekday} ({date.day}/{date.month}): {count} contribution{'s' if count != 1 else ''}")
             total_contributions += count
 
+        header_text = "GitHub Contributions"
+        if offset_weeks < 0:
+            header_text += f" ({abs(offset_weeks)} Weeks Ago)"
+
+        tooltip_text = f"<span size='large' weight='bold'>{header_text}</span>\n<span size='small' color='#a6adc8'>{start_date.strftime('%d/%m')} to {target_end_date.strftime('%d/%m')}</span>\n\nTotal: {total_contributions}\n\n" + "\n".join(tooltip_lines)
+        
+        if offset_weeks < 0:
+            tooltip_text += "\n\n<span size='small' color='#F9E2AF'><i>* Middle-click to return to current week</i></span>"
+
+        prefix = "⏳ " if offset_weeks < 0 else ""
+
         output = {
-            "text": " ".join(dots),
-            "tooltip": "\n".join([
-                f"GitHub Contributions ({start_date.strftime('%d/%m')} to {today.strftime('%d/%m')})",
-                f"Base Color: {base_color_hex}",
-                f"Total: {total_contributions}"
-            ] + tooltip_lines),
+            "text": prefix + " ".join(dots),
+            "tooltip": tooltip_text,
             "class": "github-contributions",
             "alt": "GitHub Contributions"
         }
